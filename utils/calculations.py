@@ -42,16 +42,22 @@ def filter_by_date(
     start: Optional[date | datetime] = None,
     end: Optional[date | datetime] = None,
 ) -> pd.DataFrame:
-    """Lọc theo khoảng ngày (tương đương SUMIFS date range)"""
+    """Lọc theo khoảng ngày (tương đương SUMIFS). Inclusive Từ→Đến, so sánh theo NGÀY (bỏ giờ)."""
     if df is None or df.empty:
+        return df
+    if date_col not in df.columns:
         return df
     out = df.copy()
     out[date_col] = ensure_datetime(out[date_col])
+    day = out[date_col].dt.normalize()
+    mask = out[date_col].notna()
     if start is not None:
-        out = out[out[date_col] >= pd.Timestamp(start)]
+        start_ts = pd.Timestamp(start).normalize()
+        mask &= day >= start_ts
     if end is not None:
-        out = out[out[date_col] <= pd.Timestamp(end)]
-    return out
+        end_ts = pd.Timestamp(end).normalize()
+        mask &= day <= end_ts
+    return out.loc[mask].copy()
 
 
 def filter_by_phong(df: pd.DataFrame, phong_col: str, phong: Optional[str] = None) -> pd.DataFrame:
