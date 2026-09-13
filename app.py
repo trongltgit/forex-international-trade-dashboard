@@ -445,19 +445,63 @@ if _nav == "🏠 Home / Dashboard":
         by_phong["DS"] = by_phong["DS"] / 1e6
         by_phong["LN"] = by_phong["LN"] / 1e9
 
-        dc1, dc2, dc3 = st.columns(3)
-        with dc1:
-            fig = px.pie(by_phong, values="DS", names="Phong_Ban", title="DS MBNT theo Phòng", hole=0.45)
-            fig.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=320, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        with dc2:
-            fig = px.pie(by_phong, values="LN", names="Phong_Ban", title="LN MBNT theo Phòng", hole=0.45)
-            fig.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=320, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        with dc3:
-            fig = px.pie(by_phong, values="GD", names="Phong_Ban", title="Số GD theo Phòng", hole=0.45)
-            fig.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=320, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+        def _pie(df, value_col, title):
+            fig = px.pie(
+                df,
+                values=value_col,
+                names="Phong_Ban",
+                title=title,
+                hole=0.4,
+            )
+            fig.update_traces(
+                textposition="inside",
+                textinfo="percent",
+                hovertemplate="<b>%{label}</b><br>%{value:,.2f}<br>%{percent}<extra></extra>",
+            )
+            fig.update_layout(
+                title_x=0.5,
+                margin=dict(t=50, b=120, l=10, r=10),
+                height=420,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.08,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=11),
+                    title_text="",
+                ),
+            )
+            return fig
+
+        # 3 pie xếp dọc để legend đầy đủ khi in PDF (không bị cắt)
+        st.plotly_chart(_pie(by_phong, "DS", "🍩 DS MBNT theo Phòng (tr.USD)"), use_container_width=True)
+        st.plotly_chart(_pie(by_phong, "LN", "🍩 LN MBNT theo Phòng (tỷ VND)"), use_container_width=True)
+        st.plotly_chart(_pie(by_phong, "GD", "🍩 Số GD theo Phòng"), use_container_width=True)
+
+        # Bảng chú thích màu + số liệu (in PDF rõ ràng)
+        st.markdown("**Chú thích & số liệu theo phòng**")
+        legend_df = by_phong.copy()
+        legend_df = legend_df.rename(columns={
+            "Phong_Ban": "Phòng",
+            "DS": "DS (tr.USD)",
+            "LN": "LN (tỷ VND)",
+            "GD": "Số GD",
+        })
+        legend_df["DS (tr.USD)"] = legend_df["DS (tr.USD)"].round(2)
+        legend_df["LN (tỷ VND)"] = legend_df["LN (tỷ VND)"].round(2)
+        total_ds = legend_df["DS (tr.USD)"].sum() or 1
+        total_ln = legend_df["LN (tỷ VND)"].sum() or 1
+        total_gd = legend_df["Số GD"].sum() or 1
+        legend_df["% DS"] = (legend_df["DS (tr.USD)"] / total_ds * 100).round(1)
+        legend_df["% LN"] = (legend_df["LN (tỷ VND)"] / total_ln * 100).round(1)
+        legend_df["% GD"] = (legend_df["Số GD"] / total_gd * 100).round(1)
+        st.dataframe(
+            legend_df[["Phòng", "DS (tr.USD)", "% DS", "LN (tỷ VND)", "% LN", "Số GD", "% GD"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # ══════════════════════════════════════════════
 # TAB 2: BÁO CÁO PHÒNG (luôn filter 1 phòng)
