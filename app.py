@@ -190,29 +190,28 @@ with st.sidebar:
 # ──────────────────────────────────────────────
 @st.cache_data
 def get_sample_data():
-    """Tạo sample nhỏ để demo khi chưa upload"""
+    """Sample demo cả năm 2026 – mỗi tháng khác nhau để thấy rõ khi đổi kỳ lọc"""
     import numpy as np
     rng = np.random.default_rng(42)
-    n = 200
-    dates = pd.date_range("2026-08-01", "2026-09-12", periods=n)
-    cifs = [f"CIF{1000+i%40}" for i in range(n)]
-    names = [f"Khách hàng {i%40+1}" for i in range(n)]
-    phongs = rng.choice(PHONG_LIST, n)
-    chieu = rng.choice(["BÁN", "MUA"], n)
-    ds = rng.uniform(10_000, 2_000_000, n)
-    ln = ds * rng.uniform(50, 300)  # margin approx
-    mbnt = pd.DataFrame({
-        "Ngay": dates,
-        "Ma_CIF": cifs,
-        "Ten_Khach_Hang": names,
-        "Phong_Ban": phongs,
-        "Chieu_NH": chieu,
-        "DS_Quy_USD": ds,
-        "Loi_Nhuan_VND": ln,
-        "Nguon_Mua_KH": "Nội địa",
-        "Muc_Dich_KH": rng.choice(["Trả nợ vay", "Thanh toán nhập khẩu", "Vay ngoại tệ"], n),
-    })
-    ttqt = mbnt.sample(80).copy()
+    rows = []
+    for month in range(1, 13):
+        n_m = 40 + month * 3  # tháng sau nhiều GD hơn
+        for i in range(n_m):
+            day = int(rng.integers(1, 28))
+            ds = float(rng.uniform(20_000, 500_000) * (1 + month * 0.15))
+            rows.append({
+                "Ngay": pd.Timestamp(year=2026, month=month, day=day),
+                "Ma_CIF": f"CIF{1000 + (month * 10 + i) % 50}",
+                "Ten_Khach_Hang": f"Khách hàng {(month * 10 + i) % 50 + 1}",
+                "Phong_Ban": PHONG_LIST[(month + i) % len(PHONG_LIST)],
+                "Chieu_NH": "BÁN" if i % 2 == 0 else "MUA",
+                "DS_Quy_USD": ds,
+                "Loi_Nhuan_VND": ds * float(rng.uniform(80, 250)),
+                "Nguon_Mua_KH": "Nội địa",
+                "Muc_Dich_KH": ["Trả nợ vay", "Thanh toán nhập khẩu", "Vay ngoại tệ"][i % 3],
+            })
+    mbnt = pd.DataFrame(rows)
+    ttqt = mbnt.sample(min(200, len(mbnt)), random_state=42).copy()
     ttqt = ttqt.rename(columns={"Ngay": "Ngay_GD"})
     ttqt["DS_Quy_USD"] = ttqt["DS_Quy_USD"] * 0.6
     return mbnt, ttqt
@@ -315,6 +314,39 @@ if show_ttqt and not ttqt_df.empty:
 # ──────────────────────────────────────────────
 # Nội dung theo điều hướng sidebar
 # ──────────────────────────────────────────────
+
+def show_table(df: pd.DataFrame, title: str, value_label: str):
+    """Hiển thị bảng Pareto – dùng chung Dashboard & Báo cáo phòng"""
+    st.markdown(f"**{title}**")
+    if df is None or df.empty:
+        st.info("Không có dữ liệu")
+        return
+    display = df.copy()
+
+    if "DS (tr.USD)" in value_label or value_label.startswith("DS"):
+        drop_cols = [c for c in ["LN_VND"] if c in display.columns]
+        display = display.drop(columns=drop_cols, errors="ignore")
+        value_src = "DS_TTQT" if "DS_TTQT" in display.columns else "DS_USD"
+    else:
+        drop_cols = [c for c in ["DS_USD", "DS_TTQT"] if c in display.columns]
+        display = display.drop(columns=drop_cols, errors="ignore")
+        value_src = "LN_VND"
+
+    rename = {
+        "Ma_CIF": "Mã CIF",
+        "Ten_Khach_Hang": "Tên Khách Hàng",
+        "Phong_Ban": "Phòng QL",
+        value_src: value_label,
+        "Pct": "Tỷ trọng %",
+        "CumPct": "Cộng dồn %",
+        "Rank": "Rank",
+    }
+    display = display.rename(columns={k: v for k, v in rename.items() if k in display.columns})
+    display = display.loc[:, ~display.columns.duplicated()]
+    cols_show = [c for c in ["Rank", "Mã CIF", "Tên Khách Hàng", "Phòng QL", value_label, "Tỷ trọng %", "Cộng dồn %"] if c in display.columns]
+    st.dataframe(display[cols_show], use_container_width=True, hide_index=True, height=280)
+
+
 _nav = st.session_state.get("nav_page", "🏠 Home / Dashboard")
 
 def _back_home_btn():
@@ -328,6 +360,15 @@ def _back_home_btn():
 if _nav == "🏠 Home / Dashboard":
     phong_filter = None if selected_phong == "Tất cả" else selected_phong
     kpis = compute_kpis(mbnt_df, ttqt_df, start_date, end_date, phong_filter)
+    _mbnt_f = filter_by_date(mbnt_df, "Ngay", start_date, end_date)
+    if phong_filter:
+        _mbnt_f = filter_by_phong(_mbnt_f, "Phong_Ban", phong_filter)
+    st.caption(
+        f"📌 Sau lọc kỳ **{start_date.strftime('%d/%m/%Y')} → {end_date.strftime('%d/%m/%Y')}**"
+        f" · Phòng: **{selected_phong}** · "
+        f"GD MBNT: **{len(_mbnt_f):,}** / {len(mbnt_df):,} · "
+        f"CIF: **{_mbnt_f['Ma_CIF'].nunique() if not _mbnt_f.empty else 0}**"
+    )
 
     # KPI row
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -357,40 +398,6 @@ if _nav == "🏠 Home / Dashboard":
 
     # Pareto tables
     tables = prepare_pareto_tables(mbnt_df, ttqt_df, start_date, end_date, phong_filter)
-
-    def show_table(df: pd.DataFrame, title: str, value_label: str):
-        st.markdown(f"**{title}**")
-        if df is None or df.empty:
-            st.info("Không có dữ liệu")
-            return
-        display = df.copy()
-
-        # Chỉ giữ 1 cột giá trị phù hợp với value_label, tránh trùng tên
-        if "DS (tr.USD)" in value_label or value_label.startswith("DS"):
-            # Bảng DS → giữ DS_USD / DS_TTQT, bỏ LN_VND
-            drop_cols = [c for c in ["LN_VND"] if c in display.columns]
-            display = display.drop(columns=drop_cols, errors="ignore")
-            value_src = "DS_TTQT" if "DS_TTQT" in display.columns else "DS_USD"
-        else:
-            # Bảng LN → giữ LN_VND, bỏ DS
-            drop_cols = [c for c in ["DS_USD", "DS_TTQT"] if c in display.columns]
-            display = display.drop(columns=drop_cols, errors="ignore")
-            value_src = "LN_VND"
-
-        rename = {
-            "Ma_CIF": "Mã CIF",
-            "Ten_Khach_Hang": "Tên Khách Hàng",
-            "Phong_Ban": "Phòng QL",
-            value_src: value_label,
-            "Pct": "Tỷ trọng %",
-            "CumPct": "Cộng dồn %",
-            "Rank": "Rank",
-        }
-        display = display.rename(columns={k: v for k, v in rename.items() if k in display.columns})
-        # Loại bỏ cột trùng nếu còn
-        display = display.loc[:, ~display.columns.duplicated()]
-        cols_show = [c for c in ["Rank", "Mã CIF", "Tên Khách Hàng", "Phòng QL", value_label, "Tỷ trọng %", "Cộng dồn %"] if c in display.columns]
-        st.dataframe(display[cols_show], use_container_width=True, hide_index=True, height=280)
 
     r1c1, r1c2 = st.columns(2)
     with r1c1:
@@ -460,6 +467,12 @@ elif _nav == "🏢 Báo cáo phòng":
     st.markdown("### 🏢 Báo cáo theo Phòng")
     phong_p = st.selectbox("Chọn phòng để xem chi tiết", PHONG_LIST, key="phong_detail")
     kpis_p = compute_kpis(mbnt_df, ttqt_df, start_date, end_date, phong_p)
+    _pf = filter_by_date(mbnt_df, "Ngay", start_date, end_date)
+    _pf = filter_by_phong(_pf, "Phong_Ban", phong_p)
+    st.caption(
+        f"📌 Kỳ **{start_date.strftime('%d/%m/%Y')} → {end_date.strftime('%d/%m/%Y')}**"
+        f" · Phòng **{phong_p}** · GD sau lọc: **{len(_pf):,}**"
+    )
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("DS Phòng (tr.USD)", f"{kpis_p['ds_mbnt']:,.2f}")
