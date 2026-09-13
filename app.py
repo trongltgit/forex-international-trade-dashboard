@@ -218,19 +218,31 @@ with tab_dash:
             st.info("Không có dữ liệu")
             return
         display = df.copy()
-        # Đổi tên cột dễ đọc
+
+        # Chỉ giữ 1 cột giá trị phù hợp với value_label, tránh trùng tên
+        if "DS (tr.USD)" in value_label or value_label.startswith("DS"):
+            # Bảng DS → giữ DS_USD / DS_TTQT, bỏ LN_VND
+            drop_cols = [c for c in ["LN_VND"] if c in display.columns]
+            display = display.drop(columns=drop_cols, errors="ignore")
+            value_src = "DS_TTQT" if "DS_TTQT" in display.columns else "DS_USD"
+        else:
+            # Bảng LN → giữ LN_VND, bỏ DS
+            drop_cols = [c for c in ["DS_USD", "DS_TTQT"] if c in display.columns]
+            display = display.drop(columns=drop_cols, errors="ignore")
+            value_src = "LN_VND"
+
         rename = {
             "Ma_CIF": "Mã CIF",
             "Ten_Khach_Hang": "Tên Khách Hàng",
             "Phong_Ban": "Phòng QL",
-            "DS_USD": value_label,
-            "LN_VND": value_label,
-            "DS_TTQT": value_label,
+            value_src: value_label,
             "Pct": "Tỷ trọng %",
             "CumPct": "Cộng dồn %",
             "Rank": "Rank",
         }
         display = display.rename(columns={k: v for k, v in rename.items() if k in display.columns})
+        # Loại bỏ cột trùng nếu còn
+        display = display.loc[:, ~display.columns.duplicated()]
         cols_show = [c for c in ["Rank", "Mã CIF", "Tên Khách Hàng", "Phòng QL", value_label, "Tỷ trọng %", "Cộng dồn %"] if c in display.columns]
         st.dataframe(display[cols_show], use_container_width=True, hide_index=True, height=280)
 
