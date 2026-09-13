@@ -74,15 +74,94 @@ st.markdown(
 # ──────────────────────────────────────────────
 # Sidebar – Data & Filters
 # ──────────────────────────────────────────────
+# Navigation state
+if "nav_page" not in st.session_state:
+    st.session_state.nav_page = "🏠 Home / Dashboard"
+
+NAV_OPTIONS = [
+    "🏠 Home / Dashboard",
+    "🏢 Báo cáo phòng",
+    "📋 Kế hoạch",
+    "📝 Báo cáo lời",
+    "📁 Data",
+    "📖 Hướng dẫn",
+]
+
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Vietcombank_logo.svg/200px-Vietcombank_logo.svg.png", width=160)
-    st.markdown("### 📁 Nạp dữ liệu")
-    st.caption("Dán raw giống Excel: sheet 03_Data_Raw_MBNT & Data_Raw_TTQT_TTTM")
 
+    # ── Điều hướng ──
+    st.markdown("### 🧭 Điều hướng")
+    if st.button("🏠 Về Home", use_container_width=True, type="primary"):
+        st.session_state.nav_page = "🏠 Home / Dashboard"
+        st.rerun()
+
+    st.session_state.nav_page = st.radio(
+        "Chọn trang",
+        NAV_OPTIONS,
+        index=NAV_OPTIONS.index(st.session_state.nav_page) if st.session_state.nav_page in NAV_OPTIONS else 0,
+        label_visibility="collapsed",
+        key="nav_radio",
+    )
+
+    st.divider()
+    st.markdown("### 📁 Nạp dữ liệu")
+    st.caption("Tải template → điền data → upload lại")
+
+    _tpl_dir = Path(__file__).parent / "data"
+    _tpl_xlsx = _tpl_dir / "Template_MBNT_TTQT.xlsx"
+    _tpl_mbnt_csv = _tpl_dir / "Template_MBNT.csv"
+    _tpl_ttqt_csv = _tpl_dir / "Template_TTQT.csv"
+    _tpl_phong = _tpl_dir / "Danh_Sach_Phong.csv"
+
+    st.markdown("**1. Tải template**")
+    t1, t2, t3 = st.columns(3)
+    with t1:
+        if _tpl_xlsx.exists():
+            st.download_button(
+                "Excel",
+                data=_tpl_xlsx.read_bytes(),
+                file_name="Template_MBNT_TTQT.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_tpl_xlsx",
+                help="Sheet: MBNT + TTQT + Danh_Sach_Phong",
+            )
+    with t2:
+        if _tpl_mbnt_csv.exists():
+            st.download_button(
+                "MBNT",
+                data=_tpl_mbnt_csv.read_bytes(),
+                file_name="Template_MBNT.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_tpl_mbnt",
+            )
+    with t3:
+        if _tpl_ttqt_csv.exists():
+            st.download_button(
+                "TTQT",
+                data=_tpl_ttqt_csv.read_bytes(),
+                file_name="Template_TTQT.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_tpl_ttqt",
+            )
+    if _tpl_phong.exists():
+        st.download_button(
+            "📋 Danh sách 15 phòng",
+            data=_tpl_phong.read_bytes(),
+            file_name="Danh_Sach_Phong.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_tpl_phong",
+        )
+
+    st.markdown("**2. Upload file đã điền**")
     uploaded = st.file_uploader(
-        "Upload Excel template (.xlsx)",
+        "Excel (.xlsx) – sheet MBNT / TTQT",
         type=["xlsx", "xls"],
-        help="File MBNT Dashboard VCB – sẽ đọc 2 sheet raw",
+        help="Dùng Template_MBNT_TTQT.xlsx đã điền, hoặc file Excel gốc",
     )
 
     col_a, col_b = st.columns(2)
@@ -103,8 +182,8 @@ with st.sidebar:
     selected_phong = st.selectbox("Chọn phòng", phong_options, index=0)
 
     st.divider()
-    st.caption("Nguyên tắc: Tên phòng phải khớp 100% cột Phong_Ban trong raw")
-    st.caption("Excel 2016/365 compatible logic → pandas rank + groupby")
+    st.caption("Tên phòng phải khớp 100% cột Phong_Ban")
+    st.caption("Chieu_NH = BÁN hoặc MUA · Ngày = DATE")
 
 # ──────────────────────────────────────────────
 # Load data
@@ -234,16 +313,19 @@ if show_ttqt and not ttqt_df.empty:
         st.dataframe(ttqt_df, use_container_width=True, height=360)
 
 # ──────────────────────────────────────────────
-# Tabs = Sheets
+# Nội dung theo điều hướng sidebar
 # ──────────────────────────────────────────────
-tab_dash, tab_phong, tab_kh, tab_baocao, tab_data, tab_help = st.tabs(
-    ["📊 01_DASHBOARD", "🏢 02_BÁO CÁO PHÒNG", "📋 03_KẾ HOẠCH", "📝 05_BÁO CÁO LỜI", "📁 DATA", "📖 Hướng dẫn"]
-)
+_nav = st.session_state.get("nav_page", "🏠 Home / Dashboard")
+
+def _back_home_btn():
+    if st.button("← Về Home", key=f"back_{_nav}"):
+        st.session_state.nav_page = "🏠 Home / Dashboard"
+        st.rerun()
 
 # ══════════════════════════════════════════════
-# TAB 1: DASHBOARD (chi nhánh hoặc đã lọc phòng)
+# HOME / DASHBOARD
 # ══════════════════════════════════════════════
-with tab_dash:
+if _nav == "🏠 Home / Dashboard":
     phong_filter = None if selected_phong == "Tất cả" else selected_phong
     kpis = compute_kpis(mbnt_df, ttqt_df, start_date, end_date, phong_filter)
 
@@ -373,7 +455,8 @@ with tab_dash:
 # ══════════════════════════════════════════════
 # TAB 2: BÁO CÁO PHÒNG (luôn filter 1 phòng)
 # ══════════════════════════════════════════════
-with tab_phong:
+elif _nav == "🏢 Báo cáo phòng":
+    _back_home_btn()
     st.markdown("### 🏢 Báo cáo theo Phòng")
     phong_p = st.selectbox("Chọn phòng để xem chi tiết", PHONG_LIST, key="phong_detail")
     kpis_p = compute_kpis(mbnt_df, ttqt_df, start_date, end_date, phong_p)
@@ -395,7 +478,8 @@ with tab_phong:
 # ══════════════════════════════════════════════
 # TAB 3: KẾ HOẠCH
 # ══════════════════════════════════════════════
-with tab_kh:
+elif _nav == "📋 Kế hoạch":
+    _back_home_btn()
     st.markdown("### 📋 Kế hoạch & % Hoàn thành")
     st.caption("Nhập KH (ô vàng tương đương). TH tự tính từ raw theo tháng. %HT = TH/KH")
 
@@ -457,7 +541,8 @@ with tab_kh:
 # ══════════════════════════════════════════════
 # TAB 4: BÁO CÁO LỜI
 # ══════════════════════════════════════════════
-with tab_baocao:
+elif _nav == "📝 Báo cáo lời":
+    _back_home_btn()
     st.markdown("### 📝 Báo cáo lời – Phân tích & Tổng hợp")
     st.caption("Soạn nội dung + dán nguồn ngoại (NHNN, Bloomberg…). Download / In báo cáo bên dưới.")
 
@@ -549,7 +634,8 @@ pre {{ white-space: pre-wrap; }}
 # ══════════════════════════════════════════════
 # TAB 5: DATA – View & Download
 # ══════════════════════════════════════════════
-with tab_data:
+elif _nav == "📁 Data":
+    _back_home_btn()
     st.markdown("### 📁 Data đang load – View & Download")
     st.caption("Xem toàn bộ raw data hiện tại (mẫu demo hoặc file đã upload) và tải về CSV/Excel.")
 
@@ -608,7 +694,8 @@ with tab_data:
 # ══════════════════════════════════════════════
 # TAB 6: HƯỚNG DẪN
 # ══════════════════════════════════════════════
-with tab_help:
+elif _nav == "📖 Hướng dẫn":
+    _back_home_btn()
     st.markdown("""
 ## 📖 Hướng dẫn sử dụng – MBNT Dashboard Web (VCB)
 
