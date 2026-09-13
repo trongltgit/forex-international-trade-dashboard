@@ -74,18 +74,30 @@ def aggregate_cif(
     - Tổng DS_USD, LN_VND
     - Giữ tên + phòng (lấy first)
     """
+    empty = pd.DataFrame(columns=[cif_col, name_col, phong_col, "DS_USD", "LN_VND"])
     if df is None or df.empty:
-        return pd.DataFrame(columns=[cif_col, name_col, phong_col, "DS_USD", "LN_VND"])
+        return empty
 
-    # Chuẩn hóa
     work = df.copy()
+
+    # Đảm bảo các cột tồn tại
+    if cif_col not in work.columns:
+        return empty
+    if name_col not in work.columns:
+        work[name_col] = ""
+    if phong_col not in work.columns:
+        work[phong_col] = ""
+    if ds_col not in work.columns:
+        work[ds_col] = 0
+    if ln_col not in work.columns:
+        work[ln_col] = 0
+
     work[cif_col] = work[cif_col].astype(str).str.strip()
-    work = work[work[cif_col].notna() & (work[cif_col] != "") & (work[cif_col] != "0")]
+    work = work[work[cif_col].notna() & (work[cif_col] != "") & (work[cif_col] != "0") & (work[cif_col] != "nan")]
 
     if work.empty:
-        return pd.DataFrame(columns=[cif_col, name_col, phong_col, "DS_USD", "LN_VND"])
+        return empty
 
-    # Numeric
     work[ds_col] = pd.to_numeric(work[ds_col], errors="coerce").fillna(0)
     work[ln_col] = pd.to_numeric(work[ln_col], errors="coerce").fillna(0)
 
@@ -114,10 +126,14 @@ def add_rank_and_pareto(
     Rank 1 = cao nhất (descending)
     """
     if cif_df is None or cif_df.empty:
-        return cif_df
+        return cif_df if cif_df is not None else pd.DataFrame()
 
     out = cif_df.copy()
-    total = out[value_col].sum()
+    if value_col not in out.columns:
+        # Cột không tồn tại → trả về rỗng an toàn
+        return pd.DataFrame()
+
+    total = pd.to_numeric(out[value_col], errors="coerce").fillna(0).sum()
     if total == 0:
         out["Rank"] = 0
         out["Pct"] = 0.0
@@ -263,19 +279,39 @@ def prepare_pareto_tables(
     top20_ttqt = pd.DataFrame()
     bot10_ttqt = pd.DataFrame()
     if ttqt is not None and not ttqt.empty:
-        ttqt_f = filter_by_date(ttqt, "Ngay_GD", start, end)
+        # Đảm bảo có cột ngày chuẩn
+        if "Ngay_GD" not in ttqt.columns and "Ngay" in ttqt.columns:
+            ttqt = ttqt.rename(columns={"Ngay": "Ngay_GD"})
+        ttqt_f = filter_by_date(ttqt, "Ngay_GD" if "Ngay_GD" in ttqt.columns else "Ngay", start, end)
         ttqt_f = filter_by_phong(ttqt_f, "Phong_Ban", phong)
-        cif_ttqt = aggregate_cif(
-            ttqt_f,
-            cif_col="Ma_CIF",
-            name_col="Ten_Khach_Hang",
-            phong_col="Phong_Ban",
-            ds_col="DS_Quy_USD",
-            ln_col="DS_Quy_USD",  # TTQT không có LN riêng
-        )
-        cif_ttqt = cif_ttqt.rename(columns={"DS_USD": "DS_TTQT"})
-        top20_ttqt = get_top_pareto(cif_ttqt, "DS_TTQT", 0.20)
-        bot10_ttqt = get_bottom_pareto(cif_ttqt, "DS_TTQT", 0.10)
+
+        ds_col = "DS_Quy_USD" if "DS_Quy_USD" in ttqt_f.columns else None
+        if ds_col is None:
+            # Thử tìm cột DS tương tự
+            for c in ttqt_f.columns:
+                if "ds" in str(c).lower() or "amount" in str(c).lower() or "usd" in str(c).lower():
+                    ds_col = c
+                    break
+
+        if ds_col and not ttqt_f.empty:
+            cif_ttqt = aggregate_cif(
+                ttqt_f,
+                cif_col="Ma_CIF" if "Ma_CIF" in ttqt_f.columns else ttqt_f.columns[0],
+                name_col="Ten_Khach_Hang" if "Ten_Khach_Hang" in ttqt_f.columns else "Ma_CIF",
+                phong_col="Phong_Ban" if "Phong_Ban" in ttqt_f.columns else "Ma_CIF",
+                ds_col=ds_col,
+                ln_col=ds_col,
+            )
+            if "DS_USD" in cif_ttqt.columns:
+                cif_ttqt = cif_ttqt.rename(columns={"DS_USD": "DS_TTQT"})
+            elif ds_col in cif_ttqt.columns:
+                cif_ttqt = cif_ttqt.rename(columns={ds_col: "DS_TTQT"})
+            else:
+                cif_ttqt["DS_TTQT"] = 0
+
+            if "DS_TTQT" in cif_ttqt.columns:
+                top20_ttqt = get_top_pareto(cif_ttqt, "DS_TTQT", 0.20)
+                bot10_ttqt = get_bottom_pareto(cif_ttqt, "DS_TTQT", 0.10)
 
     # Bán-Trả nợ / Mua-Vay
     ban = filter_chieu(mbnt_f, "Chieu_NH", "BÁN")
