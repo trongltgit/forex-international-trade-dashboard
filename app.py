@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
+import io
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -159,6 +160,61 @@ if "ke_hoach" not in st.session_state:
         "DS_TTQT": {p: {f"T{m}": 0.0 for m in range(1, 13)} for p in PHONG_LIST},
     }
 
+
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def _df_to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Data") -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    return buf.getvalue()
+
+
+# Sidebar: View / Download data đang load
+with st.sidebar:
+    st.divider()
+    st.markdown("### 👁 Data đang load")
+    st.caption(f"MBNT: **{len(mbnt_df):,}** dòng | TTQT: **{len(ttqt_df):,}** dòng")
+
+    show_mbnt = st.checkbox("Xem MBNT", key="view_mbnt")
+    show_ttqt = st.checkbox("Xem TTQT", key="view_ttqt")
+
+    c_dl1, c_dl2 = st.columns(2)
+    with c_dl1:
+        if not mbnt_df.empty:
+            st.download_button(
+                "⬇ MBNT CSV",
+                data=_df_to_csv_bytes(mbnt_df),
+                file_name=f"MBNT_{start_date}_{end_date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.download_button(
+                "⬇ MBNT Excel",
+                data=_df_to_excel_bytes(mbnt_df, "MBNT"),
+                file_name=f"MBNT_{start_date}_{end_date}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    with c_dl2:
+        if not ttqt_df.empty:
+            st.download_button(
+                "⬇ TTQT CSV",
+                data=_df_to_csv_bytes(ttqt_df),
+                file_name=f"TTQT_{start_date}_{end_date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.download_button(
+                "⬇ TTQT Excel",
+                data=_df_to_excel_bytes(ttqt_df, "TTQT"),
+                file_name=f"TTQT_{start_date}_{end_date}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
 # ──────────────────────────────────────────────
 # Header
 # ──────────────────────────────────────────────
@@ -169,11 +225,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Hiển thị raw data khi tick checkbox sidebar
+if show_mbnt and not mbnt_df.empty:
+    with st.expander(f"📋 Raw MBNT đang load ({len(mbnt_df):,} dòng)", expanded=True):
+        st.dataframe(mbnt_df, use_container_width=True, height=360)
+if show_ttqt and not ttqt_df.empty:
+    with st.expander(f"📋 Raw TTQT đang load ({len(ttqt_df):,} dòng)", expanded=True):
+        st.dataframe(ttqt_df, use_container_width=True, height=360)
+
 # ──────────────────────────────────────────────
 # Tabs = Sheets
 # ──────────────────────────────────────────────
-tab_dash, tab_phong, tab_kh, tab_baocao, tab_help = st.tabs(
-    ["📊 01_DASHBOARD", "🏢 02_BÁO CÁO PHÒNG", "📋 03_KẾ HOẠCH", "📝 05_BÁO CÁO LỜI", "📖 Hướng dẫn"]
+tab_dash, tab_phong, tab_kh, tab_baocao, tab_data, tab_help = st.tabs(
+    ["📊 01_DASHBOARD", "🏢 02_BÁO CÁO PHÒNG", "📋 03_KẾ HOẠCH", "📝 05_BÁO CÁO LỜI", "📁 DATA", "📖 Hướng dẫn"]
 )
 
 # ══════════════════════════════════════════════
@@ -395,7 +459,7 @@ with tab_kh:
 # ══════════════════════════════════════════════
 with tab_baocao:
     st.markdown("### 📝 Báo cáo lời – Phân tích & Tổng hợp")
-    st.caption("Soạn nội dung + dán nguồn ngoại (NHNN, Bloomberg…). Có thể export PDF từ trình duyệt.")
+    st.caption("Soạn nội dung + dán nguồn ngoại (NHNN, Bloomberg…). Download / In báo cáo bên dưới.")
 
     sections = [
         ("I. BỐI CẢNH THỊ TRƯỜNG", "Nhập nội dung từ NHNN, TTCK, bộ/ngành..."),
@@ -409,23 +473,140 @@ with tab_baocao:
         ("IX. TÀI LIỆU ĐÍNH KÈM", "Link / tóm tắt nguồn"),
     ]
 
+    report_parts = []
+    phong_filter_r = None if selected_phong == "Tất cả" else selected_phong
+    kpis_r = compute_kpis(mbnt_df, ttqt_df, start_date, end_date, phong_filter_r)
+
+    kpi_block = f"""Kỳ báo cáo: {start_date.strftime('%d/%m/%Y')} → {end_date.strftime('%d/%m/%Y')}
+Phòng: {selected_phong}
+DS MBNT: {kpis_r['ds_mbnt']:,.2f} tr.USD
+LN MBNT: {kpis_r['ln_mbnt']:,.2f} tỷ VND
+DS TTQT: {kpis_r['ds_ttqt']:,.2f} tr.USD
+Số GD MBNT: {kpis_r['so_gd']:,} | Số CIF: {kpis_r['so_cif']:,}
+DS Bán: {kpis_r['ds_ban']:,.2f} | DS Mua: {kpis_r['ds_mua']:,.2f} tr.USD
+"""
+    report_parts.append("=== TÓM TẮT KPI ===\n" + kpi_block)
+
     for title, placeholder in sections:
         with st.expander(title, expanded=(title.startswith("I.") or title.startswith("III."))):
-            st.text_area(label=title, placeholder=placeholder, height=120, key=f"bc_{title}", label_visibility="collapsed")
+            txt = st.text_area(label=title, placeholder=placeholder, height=120, key=f"bc_{title}", label_visibility="collapsed")
+            if txt and txt.strip():
+                report_parts.append(f"\n=== {title} ===\n{txt.strip()}")
 
-    if st.button("📄 Tóm tắt KPI vào báo cáo (copy)"):
-        summary = f"""
-Kỳ báo cáo: {start_date} → {end_date}
-Phòng: {selected_phong}
-DS MBNT: {kpis['ds_mbnt']:,.2f} tr.USD
-LN MBNT: {kpis['ln_mbnt']:,.2f} tỷ VND
-DS TTQT: {kpis['ds_ttqt']:,.2f} tr.USD
-Số GD: {kpis['so_gd']:,} | Số CIF: {kpis['so_cif']:,}
+    full_report = "\n".join(report_parts)
+    full_report_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Báo cáo MBNT VCB</title>
+<style>
+body {{ font-family: 'Segoe UI', Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; color: #222; }}
+h1 {{ color: #003366; border-bottom: 2px solid #003366; padding-bottom: 8px; }}
+h2 {{ color: #003366; margin-top: 28px; }}
+.kpi {{ background: #f0f7ff; padding: 16px; border-radius: 8px; border-left: 4px solid #003366; white-space: pre-wrap; }}
+pre {{ white-space: pre-wrap; }}
+@media print {{ body {{ margin: 0; }} }}
+</style></head><body>
+<h1>⚡ BÁO CÁO LỜI – MBNT & TTQT | VIETCOMBANK</h1>
+<div class="kpi">{kpi_block}</div>
 """
-        st.code(summary)
+    for part in report_parts[1:]:
+        if part.startswith("\n=== "):
+            title_line = part.split("\n")[1].replace("=== ", "").replace(" ===", "")
+            body = "\n".join(part.split("\n")[2:])
+            full_report_html += f"<h2>{title_line}</h2><pre>{body}</pre>"
+    full_report_html += """
+<script>/* Nút in */</script>
+<p style="margin-top:40px;color:#888;font-size:12px;">In: Ctrl+P hoặc nút Print bên dưới · MBNT Dashboard VCB</p>
+</body></html>"""
+
+    st.divider()
+    st.markdown("#### 📤 Xuất / In báo cáo")
+    rc1, rc2, rc3 = st.columns(3)
+    with rc1:
+        st.download_button(
+            "⬇ Download TXT",
+            data=full_report.encode("utf-8-sig"),
+            file_name=f"BaoCao_MBNT_{start_date}_{end_date}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with rc2:
+        st.download_button(
+            "⬇ Download HTML",
+            data=full_report_html.encode("utf-8"),
+            file_name=f"BaoCao_MBNT_{start_date}_{end_date}.html",
+            mime="text/html",
+            use_container_width=True,
+            help="Mở file HTML → Ctrl+P để in / Save as PDF",
+        )
+    with rc3:
+        if st.button("🖨 Xem bản in (HTML)", use_container_width=True):
+            st.session_state["show_print_preview"] = True
+
+    if st.session_state.get("show_print_preview"):
+        st.markdown("---")
+        st.markdown("##### Bản xem trước (in bằng Ctrl+P)")
+        st.components.v1.html(full_report_html, height=600, scrolling=True)
 
 # ══════════════════════════════════════════════
-# TAB 5: HƯỚNG DẪN
+# TAB 5: DATA – View & Download
+# ══════════════════════════════════════════════
+with tab_data:
+    st.markdown("### 📁 Data đang load – View & Download")
+    st.caption("Xem toàn bộ raw data hiện tại (mẫu demo hoặc file đã upload) và tải về CSV/Excel.")
+
+    d1, d2 = st.columns(2)
+    with d1:
+        st.metric("Số dòng MBNT", f"{len(mbnt_df):,}")
+    with d2:
+        st.metric("Số dòng TTQT", f"{len(ttqt_df):,}")
+
+    st.markdown("#### MBNT")
+    if mbnt_df.empty:
+        st.info("Chưa có data MBNT")
+    else:
+        st.dataframe(mbnt_df, use_container_width=True, height=400)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button(
+                "⬇ Download MBNT CSV",
+                data=_df_to_csv_bytes(mbnt_df),
+                file_name=f"MBNT_{start_date}_{end_date}.csv",
+                mime="text/csv",
+                key="dl_mbnt_csv_tab",
+            )
+        with c2:
+            st.download_button(
+                "⬇ Download MBNT Excel",
+                data=_df_to_excel_bytes(mbnt_df, "MBNT"),
+                file_name=f"MBNT_{start_date}_{end_date}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_mbnt_xlsx_tab",
+            )
+
+    st.markdown("#### TTQT")
+    if ttqt_df.empty:
+        st.info("Chưa có data TTQT")
+    else:
+        st.dataframe(ttqt_df, use_container_width=True, height=400)
+        c3, c4 = st.columns(2)
+        with c3:
+            st.download_button(
+                "⬇ Download TTQT CSV",
+                data=_df_to_csv_bytes(ttqt_df),
+                file_name=f"TTQT_{start_date}_{end_date}.csv",
+                mime="text/csv",
+                key="dl_ttqt_csv_tab",
+            )
+        with c4:
+            st.download_button(
+                "⬇ Download TTQT Excel",
+                data=_df_to_excel_bytes(ttqt_df, "TTQT"),
+                file_name=f"TTQT_{start_date}_{end_date}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_ttqt_xlsx_tab",
+            )
+
+# ══════════════════════════════════════════════
+# TAB 6: HƯỚNG DẪN
 # ══════════════════════════════════════════════
 with tab_help:
     st.markdown("""
